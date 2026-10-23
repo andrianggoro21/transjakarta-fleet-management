@@ -1,0 +1,138 @@
+{
+  "info": {
+    "name": "Transjakarta Fleet Management",
+    "description": "REST API backend manajemen armada. Jalankan stack dengan `docker compose up -d --build` lalu tunggu publisher mengirim data beberapa detik.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "vehicleId", "value": "B1234XYZ" },
+    { "key": "start", "value": "" },
+    { "key": "end", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const now = Math.floor(Date.now() / 1000);",
+          "if (!pm.collectionVariables.get('start')) { pm.collectionVariables.set('start', String(now - 3600)); }",
+          "if (!pm.collectionVariables.get('end')) { pm.collectionVariables.set('end', String(now)); }"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Latest location",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/vehicles/{{vehicleId}}/location"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "pm.test('body has location fields', () => {",
+              "  const b = pm.response.json();",
+              "  pm.expect(b.vehicle_id).to.eql(pm.collectionVariables.get('vehicleId'));",
+              "  pm.expect(b.latitude).to.be.a('number');",
+              "  pm.expect(b.longitude).to.be.a('number');",
+              "  pm.expect(b.timestamp).to.be.a('number');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "History",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/vehicles/{{vehicleId}}/history?start={{start}}&end={{end}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "pm.test('array sorted by timestamp asc within range', () => {",
+              "  const b = pm.response.json();",
+              "  pm.expect(b).to.be.an('array');",
+              "  const start = Number(pm.collectionVariables.get('start'));",
+              "  const end = Number(pm.collectionVariables.get('end'));",
+              "  for (let i = 0; i < b.length; i++) {",
+              "    pm.expect(b[i].timestamp).to.be.within(start, end);",
+              "    if (i > 0) { pm.expect(b[i].timestamp).to.be.at.least(b[i - 1].timestamp); }",
+              "  }",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Location unknown vehicle (404)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/vehicles/UNKNOWN/location"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 404', () => pm.response.to.have.status(404));",
+              "pm.test('error message', () => pm.expect(pm.response.json().error).to.eql('location not found'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "History invalid params (400)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/vehicles/{{vehicleId}}/history?start=abc&end=1"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 400', () => pm.response.to.have.status(400));",
+              "pm.test('has error field', () => pm.expect(pm.response.json().error).to.be.a('string'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
