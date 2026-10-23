@@ -1,0 +1,91 @@
+x-healthcheck: &healthcheck
+  interval: 5s
+  timeout: 5s
+  retries: 12
+
+x-env: &env
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: fleet
+      POSTGRES_DB: fleet
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "pg_isready -U fleet -d fleet"]
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: fleet
+      RABBITMQ_DEFAULT_PASS: fleet
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/broker/version' -C 1 -W 3"]
+
+  app:
+    <<: *env
+    build: .
+    image: fleet-backend
+    command: ["app"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+    restart: unless-stopped
+    stop_grace_period: 15s
+
+  worker:
+    <<: *env
+    image: fleet-backend
+    command: ["worker"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      app:
+        condition: service_started
+    restart: unless-stopped
+
+  publisher:
+    <<: *env
+    image: fleet-backend
+    command: ["publisher"]
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
